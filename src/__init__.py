@@ -1,0 +1,2 @@
+"""Soccer weather pitch pipeline."""
+
