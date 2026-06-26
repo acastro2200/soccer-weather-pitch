@@ -7,6 +7,7 @@ from datetime import time
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
+from src.geocoder import DEFAULT_USER_AGENT
 from src.match_source import RESULTS_CSV_URL
 
 
@@ -14,7 +15,7 @@ class Settings(BaseModel):
     results_csv_url: str = RESULTS_CSV_URL
     open_meteo_base_url: str = "https://archive-api.open-meteo.com/v1/archive"
     nominatim_base_url: str = "https://nominatim.openstreetmap.org/search"
-    user_agent: str = Field(default="soccer-weather-pitch/1.0 your_email@example.com", min_length=1)
+    user_agent: str = Field(default=DEFAULT_USER_AGENT, min_length=1)
     default_kickoff_local: time = time(hour=18)
     request_timeout_seconds: float = Field(default=30.0, gt=0)
     default_output_path: Path = Path("data/output/match_conditions.csv")
@@ -26,7 +27,7 @@ class Settings(BaseModel):
     def strip_user_agent(cls, value: str) -> str:
         user_agent = value.strip()
         if not user_agent:
-            raise ValueError("USER_AGENT must not be empty")
+            return DEFAULT_USER_AGENT
         return user_agent
 
     @field_validator("default_kickoff_local", mode="before")
@@ -53,7 +54,7 @@ class Settings(BaseModel):
                     "NOMINATIM_BASE_URL",
                     "https://nominatim.openstreetmap.org/search",
                 ),
-                user_agent=os.getenv("USER_AGENT", "soccer-weather-pitch/1.0 your_email@example.com"),
+                user_agent=os.getenv("USER_AGENT", DEFAULT_USER_AGENT),
                 default_kickoff_local=os.getenv("DEFAULT_KICKOFF_LOCAL", "18:00"),
                 request_timeout_seconds=float(os.getenv("REQUEST_TIMEOUT_SECONDS", "30")),
             )

@@ -22,6 +22,8 @@ GEOCODE_COLUMNS = [
     "display_name",
     "geocoded_at",
 ]
+DEFAULT_USER_AGENT = "soccer-weather-pitch/1.0 (contact: acastro2200@gmail.com)"
+MIN_REQUEST_INTERVAL_SECONDS = 1.5
 
 
 class GeocodingError(RuntimeError):
@@ -38,19 +40,20 @@ class NominatimGeocoder:
         self,
         cache_path: Path = Path("data/output/geocoded_locations.csv"),
         base_url: str = "https://nominatim.openstreetmap.org/search",
-        user_agent: str = "soccer-weather-pitch/0.1",
+        user_agent: str = DEFAULT_USER_AGENT,
         session: requests.Session | None = None,
         timeout_seconds: float = 30.0,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.cache_path = cache_path
         self.base_url = base_url
-        self.user_agent = user_agent
+        self.user_agent = _normalize_user_agent(user_agent)
         self.session = session or requests.Session()
         self.timeout_seconds = timeout_seconds
         self.sleep = sleep
         self._last_request_at: float | None = None
         self._cache = self._load_cache()
+        self._failed_cache: dict[str, str] = {}
 
     def geocode(self, city: str, country: str) -> Venue:
         city = city.strip()
@@ -62,6 +65,9 @@ class NominatimGeocoder:
         cached = self._cache.get(cache_key)
         if cached is not None:
             return cached
+        failed_reason = self._failed_cache.get(cache_key)
+        if failed_reason is not None:
+            raise GeocodingError(f"Previous geocoding failure for {city}, {country}: {failed_reason}")
 
         self._respect_rate_limit()
         params = {
@@ -69,7 +75,10 @@ class NominatimGeocoder:
             "format": "jsonv2",
             "limit": 1,
         }
-        headers = {"User-Agent": self.user_agent}
+        headers = {
+            "User-Agent": self.user_agent,
+            "Accept": "application/json",
+        }
         try:
             response = self.session.get(
                 self.base_url,
@@ -80,13 +89,21 @@ class NominatimGeocoder:
             response.raise_for_status()
             payload = response.json()
         except requests.RequestException as exc:
-            raise GeocodingError(f"Nominatim request failed: {exc}") from exc
+            reason = f"Nominatim request failed: {exc}"
+            self._failed_cache[cache_key] = reason
+            raise GeocodingError(reason) from exc
         except ValueError as exc:
-            raise GeocodingError("Nominatim returned invalid JSON.") from exc
+            reason = "Nominatim returned invalid JSON."
+            self._failed_cache[cache_key] = reason
+            raise GeocodingError(reason) from exc
         finally:
             self._last_request_at = time.monotonic()
 
-        venue = _venue_from_nominatim_payload(payload, city, country)
+        try:
+            venue = _venue_from_nominatim_payload(payload, city, country)
+        except GeocodingError as exc:
+            self._failed_cache[cache_key] = str(exc)
+            raise
         self._cache[cache_key] = venue
         self._write_cache()
         LOGGER.info("Geocoded %s, %s", city, country)
@@ -96,8 +113,8 @@ class NominatimGeocoder:
         if self._last_request_at is None:
             return
         elapsed = time.monotonic() - self._last_request_at
-        if elapsed < 1.0:
-            self.sleep(1.0 - elapsed)
+        if elapsed < MIN_REQUEST_INTERVAL_SECONDS:
+            self.sleep(MIN_REQUEST_INTERVAL_SECONDS - elapsed)
 
     def _load_cache(self) -> dict[str, Venue]:
         if not self.cache_path.exists():
@@ -167,6 +184,32 @@ def _venue_from_nominatim_payload(payload: Any, city: str, country: str) -> Venu
 
 def _location_key(city: str, country: str) -> str:
     return f"{city.strip().casefold()}|{country.strip().casefold()}"
+
+
+def _normalize_user_agent(value: str | None) -> str:
+    user_agent = (value or "").strip()
+    if _is_generic_user_agent(user_agent):
+        return DEFAULT_USER_AGENT
+    return user_agent
+
+
+def _is_generic_user_agent(user_agent: str) -> bool:
+    lowered = user_agent.casefold()
+    if not lowered:
+        return True
+    if "your_email@example.com" in lowered:
+        return True
+    return lowered in {
+        "python-requests",
+        "python-requests/2",
+        "requests",
+        "python",
+        "curl",
+        "wget",
+        "mozilla",
+        "soccer-weather-pitch",
+        "soccer-weather-pitch/0.1",
+    }
 
 
 def _parse_float(value: Any) -> float | None:
