@@ -13,7 +13,7 @@ The main project uses:
 No paid APIs are required. No API keys are required.
 Pitch condition is inferred from weather and is not an official provider condition.
 
-Run the real pipeline with:
+Run the real pipeline locally with:
 
 ```bash
 python -m src.pipeline \
@@ -24,6 +24,7 @@ python -m src.pipeline \
 ```
 
 The public match CSV does not include kickoff times, so the pipeline uses local `18:00` and writes `kickoff_time_estimated=True`.
+Pitch condition is inferred from weather signals; it is not an official pitch condition.
 
 Main outputs:
 
@@ -82,3 +83,26 @@ pytest
 ```
 
 Tests use mocked clients/responses and do not call live APIs.
+
+## GitHub Actions
+
+The workflow at `.github/workflows/run_pipeline.yml` runs the zero-paid real pipeline manually or on the first day of each month at 9 AM UTC.
+
+To run it manually:
+
+1. Open the repository on GitHub.
+2. Go to the **Actions** tab.
+3. Select **Run zero-paid pipeline**.
+4. Click **Run workflow**.
+
+The workflow installs dependencies from `requirements.txt`, installs the project editable from `pyproject.toml`, runs `pytest`, then runs:
+
+```bash
+python -m src.pipeline \
+  --teams Portugal Colombia \
+  --start-date 2000-01-01 \
+  --end-date "$(date +%F)" \
+  --output data/output/match_conditions.csv
+```
+
+No GitHub secrets are required. Outputs are uploaded as the `soccer-weather-pitch-output` artifact; open the completed workflow run and download it from the **Artifacts** section.
